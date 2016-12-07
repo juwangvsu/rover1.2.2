@@ -40,21 +40,21 @@ set(config_module_list
 	#drivers/frsky_telemetry
 	modules/sensors
 	#drivers/mkblctrl
-	drivers/px4flow
+	#drivers/px4flow
 	#drivers/oreoled
 	#drivers/vmount
 	drivers/pwm_input
 	drivers/camera_trigger
 	drivers/bst
 	#drivers/snapdragon_rc_pwm
-	drivers/lis3mdl
+	#drivers/lis3mdl
 
 	#
 	# System commands
 	#
 	systemcmds/bl_update
 	systemcmds/config
-	#systemcmds/dumpfile
+	systemcmds/dumpfile
 	#systemcmds/esc_calib
 	systemcmds/mixer
 	#systemcmds/motor_ramp
@@ -97,18 +97,18 @@ set(config_module_list
 	# Estimation modules
 	#
 	modules/attitude_estimator_q
-	#modules/position_estimator_inav
+	modules/position_estimator_inav
 	modules/local_position_estimator
 	modules/ekf2
 
 	#
 	# Vehicle Control
 	#
-	modules/fw_pos_control_l1
-	modules/fw_att_control
+	#modules/fw_pos_control_l1
+	#modules/fw_att_control
 	modules/mc_att_control
 	modules/mc_pos_control
-	modules/vtol_att_control
+	#modules/vtol_att_control
 
 	#
 	# Logging
@@ -138,7 +138,7 @@ set(config_module_list
 	lib/conversion
 	lib/launchdetection
 	lib/terrain_estimation
-	lib/runway_takeoff
+	#lib/runway_takeoff
 	lib/tailsitter_recovery
 	lib/DriverFramework/framework
 	platforms/nuttx
