@@ -52,6 +52,7 @@
 #include "tests_main.h"
 
 #include <drivers/drv_gpio.h>
+#include <unistd.h>
 
 
 /****************************************************************************
@@ -93,8 +94,8 @@ int test_gpio(int argc, char *argv[])
 
 #ifdef PX4IO_DEVICE_PATH
 
-	int fd = px4_open(PX4IO_DEVICE_PATH, 0);
-
+	//int fd = px4_open(PX4IO_DEVICE_PATH, 0);
+	int fd = px4_open(PX4FMU_DEVICE_PATH, 0);
 	if (fd < 0) {
 		PX4_ERR("GPIO: open fail");
 		return ERROR;
@@ -102,13 +103,24 @@ int test_gpio(int argc, char *argv[])
 
 	/* set all GPIOs to default state */
 	px4_ioctl(fd, GPIO_RESET, ~0);
+	for (int i =0; i< 10; i++){
+		//PX4_INFO("test io");
+		px4_ioctl(fd, GPIO_SET_OUTPUT_LOW, 0xffff);
+		//px4_ioctl(fd, GPIO_SET_OUTPUT_LOW, 1<<i);
+		usleep(1000000);
+		px4_ioctl(fd, GPIO_SET_OUTPUT_HIGH, 1<<i);
+		usleep(1000000);
+	}
+	
 
 
 	/* XXX need to add some GPIO waving stuff here */
 
 
+	px4_ioctl(fd, GPIO_SET_OUTPUT_LOW, 0xffff);
+	//px4_ioctl(fd, GPIO_SET_OUTPUT_LOW, 0x0000);
 	/* Go back to default */
-	px4_ioctl(fd, GPIO_RESET, ~0);
+	//px4_ioctl(fd, GPIO_RESET, ~0);
 
 	px4_close(fd);
 	PX4_INFO("GPIO test successful.");

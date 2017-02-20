@@ -312,7 +312,7 @@ pwm_main(int argc, char *argv[])
 		/* change alternate PWM rate */
 		if (alt_rate > 0) {
 			ret = ioctl(fd, PWM_SERVO_SET_UPDATE_RATE, alt_rate);
-
+			printf("alt_rate = %d\n",alt_rate);
 			if (ret != OK) {
 				err(1, "PWM_SERVO_SET_UPDATE_RATE (check rate for sanity)");
 			}
@@ -321,6 +321,7 @@ pwm_main(int argc, char *argv[])
 		/* directly supplied channel mask */
 		if (set_mask > 0) {
 			ret = ioctl(fd, PWM_SERVO_SET_SELECT_UPDATE_RATE, set_mask);
+			printf("set_mask = %d\n",set_mask);
 
 			if (ret != OK) {
 				err(1, "PWM_SERVO_SET_SELECT_UPDATE_RATE");
@@ -336,6 +337,7 @@ pwm_main(int argc, char *argv[])
 					uint32_t group_mask;
 
 					ret = ioctl(fd, PWM_SERVO_GET_RATEGROUP(group), (unsigned long)&group_mask);
+			printf("group = %d group_mask = %d\n",group, group_mask);
 
 					if (ret != OK) {
 						err(1, "PWM_SERVO_GET_RATEGROUP(%u)", group);
@@ -346,7 +348,7 @@ pwm_main(int argc, char *argv[])
 			}
 
 			ret = ioctl(fd, PWM_SERVO_SET_SELECT_UPDATE_RATE, mask);
-
+			printf("mask = %d\n", mask);
 			if (ret != OK) {
 				err(1, "PWM_SERVO_SET_SELECT_UPDATE_RATE");
 			}

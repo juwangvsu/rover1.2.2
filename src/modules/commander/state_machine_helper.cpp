@@ -418,7 +418,7 @@ main_state_transition(struct vehicle_status_s *status, main_state_t new_main_sta
 	case commander_state_s::MAIN_STATE_AUTO_RTL:
 	case commander_state_s::MAIN_STATE_AUTO_TAKEOFF:
 	case commander_state_s::MAIN_STATE_AUTO_LAND:
-
+ warn("wang global_position_valid %d home_position_valid %d"  ,status_flags->condition_global_position_valid , status_flags->condition_home_position_valid);
 		/* need global position and home position */
 		if (status_flags->condition_global_position_valid && status_flags->condition_home_position_valid) {
 			ret = TRANSITION_CHANGED;
@@ -447,10 +447,11 @@ main_state_transition(struct vehicle_status_s *status, main_state_t new_main_sta
 			internal_state->timestamp = hrt_absolute_time();
 
 		} else {
+			warn("wang Not able to change state");
 			ret = TRANSITION_NOT_CHANGED;
 		}
 	}
-
+	warn("wang state_transition can be changed %d", ret);
 	return ret;
 }
 

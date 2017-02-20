@@ -869,7 +869,10 @@ void Ekf2::task_main()
 			} else {
 				orb_publish(ORB_ID(vehicle_local_position), _lpos_pub, &lpos);
 			}
-
+	static int tmpcnt;
+	tmpcnt++;
+	if(tmpcnt%200==0)
+		warnx("global position OK %s", (_ekf.global_position_is_valid()) ? "[YES]" : "[NO]");
 			if (_ekf.global_position_is_valid()) {
 				// generate and publish global position data
 				struct vehicle_global_position_s global_pos = {};

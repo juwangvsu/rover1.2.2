@@ -178,7 +178,7 @@ static void usage(const char *reason)
 		printf("%s\n", reason);
 	}
 
-	printf("usage: ver {hw|hwcmp|git|bdate|gcc|all|mcu|uid}\n\n");
+	printf("jw usage: ver {hw|hwcmp|git|bdate|gcc|all|mcu|uid}\n\n");
 }
 
 __EXPORT int ver_main(int argc, char *argv[]);

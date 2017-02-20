@@ -29,7 +29,7 @@ set(config_module_list
 	#drivers/ll40ls
 	drivers/trone
 	drivers/gps
-	drivers/pwm_out_sim
+	#drivers/pwm_out_sim
 	#drivers/hott
 	#drivers/hott/hott_telemetry
 	#drivers/hott/hott_sensors
@@ -44,7 +44,7 @@ set(config_module_list
 	#drivers/oreoled
 	#drivers/vmount
 	drivers/pwm_input
-	drivers/camera_trigger
+	#drivers/camera_trigger
 	drivers/bst
 	#drivers/snapdragon_rc_pwm
 	#drivers/lis3mdl
@@ -66,21 +66,21 @@ set(config_module_list
 	systemcmds/reboot
 	#systemcmds/sd_bench
 	systemcmds/top
-	#systemcmds/topic_listener
+	systemcmds/topic_listener
 	systemcmds/ver
 
 	#
 	# Testing
 	#
-	#drivers/sf0x/sf0x_tests
+	drivers/sf0x/sf0x_tests
 	#drivers/test_ppm
 	#lib/rc/rc_tests
-	#modules/commander/commander_tests
-	#modules/controllib_test
+	modules/commander/commander_tests
+	modules/controllib_test
 	#modules/mavlink/mavlink_tests
-	#modules/unit_test
-	#modules/uORB/uORB_tests
-	#systemcmds/tests
+	modules/unit_test
+	modules/uORB/uORB_tests
+	systemcmds/tests
 
 	#
 	# General system control
@@ -96,10 +96,10 @@ set(config_module_list
 	#
 	# Estimation modules
 	#
-	modules/attitude_estimator_q
-	modules/position_estimator_inav
-	modules/local_position_estimator
-	modules/ekf2
+	#modules/attitude_estimator_q
+	#modules/position_estimator_inav
+	#modules/local_position_estimator
+	#modules/ekf2
 
 	#
 	# Vehicle Control
@@ -108,6 +108,7 @@ set(config_module_list
 	#modules/fw_att_control
 	modules/mc_att_control
 	modules/mc_pos_control
+	modules/mc_pos_control/mc_pos_control_tests
 	#modules/vtol_att_control
 
 	#
@@ -115,6 +116,7 @@ set(config_module_list
 	#
 	#modules/logger
 	modules/sdlog2
+	modules/rover_commander
 
 	#
 	# Library modules
@@ -137,7 +139,7 @@ set(config_module_list
 	lib/geo_lookup
 	lib/conversion
 	lib/launchdetection
-	lib/terrain_estimation
+	#lib/terrain_estimation
 	#lib/runway_takeoff
 	lib/tailsitter_recovery
 	lib/DriverFramework/framework
@@ -178,7 +180,7 @@ set(config_module_list
 	#examples/fixedwing_control
 
 	# Hardware test
-	#examples/hwtest
+	examples/hwtest
 )
 
 set(config_extra_builtin_cmds

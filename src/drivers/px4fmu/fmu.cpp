@@ -2328,6 +2328,7 @@ PX4FMU::gpio_set_function(uint32_t gpios, int function)
 	 * GPIOs 0 and 1 must have the same direction as they are buffered
 	 * by a shared 2-port driver.  Any attempt to set either sets both.
 	 */
+	//fprintf(stdout, "wang gpio_set_function 1\n");
 	if (gpios & BOARD_GPIO_SHARED_BUFFERED_BITS) {
 		gpios |= BOARD_GPIO_SHARED_BUFFERED_BITS;
 
@@ -2341,9 +2342,11 @@ PX4FMU::gpio_set_function(uint32_t gpios, int function)
 
 #endif
 
+	//fprintf(stdout, "wang gpio_set_function 2\n");
 	/* configure selected GPIOs as required */
 	for (unsigned i = 0; i < _ngpio; i++) {
 		if (gpios & (1 << i)) {
+			//fprintf(stdout, "wang set pin %d\n", i);
 			switch (function) {
 			case GPIO_SET_INPUT:
 				px4_arch_configgpio(_gpio_tab[i].input);
@@ -2540,6 +2543,8 @@ PX4FMU::gpio_ioctl(struct file *filp, int cmd, unsigned long arg)
 	int	ret = OK;
 
 	lock();
+	//warnx("\n px4fmu/fmu.c gpio_ioctl \n");
+	//fprintf(stdout, "px4fmu/fmu.c gpio_ioctl\n");
 
 	switch (cmd) {
 
@@ -2619,8 +2624,20 @@ PX4FMU::dsm_bind_ioctl(int dsmMode)
 	}
 }
 
-namespace
-{
+//namespace
+//{
+
+void
+bind_spektrum();
+int fmu_new_i2c_speed(unsigned bus, unsigned clock_hz);
+int
+fmu_start(void);
+int fmu_stop(void);
+void
+sensor_reset(int ms);
+void peripheral_reset(int);
+void test();
+void fake(int, char**);
 
 void
 bind_spektrum()
@@ -2667,7 +2684,8 @@ enum PortMode {
 };
 
 PortMode g_port_mode;
-
+ __EXPORT int fmu_new_mode(PortMode new_mode);
+//extern int fmu_new_mode(PortMode new_mode);
 int
 fmu_new_mode(PortMode new_mode)
 {
@@ -3080,7 +3098,7 @@ fake(int argc, char *argv[])
 	exit(0);
 }
 
-} // namespace
+//} // namespace
 
 extern "C" __EXPORT int fmu_main(int argc, char *argv[]);
 
@@ -3249,4 +3267,10 @@ fmu_main(int argc, char *argv[])
 #endif
 	fprintf(stderr, "\n");
 	exit(1);
+}
+
+__EXPORT void fmu_test_wang();
+void fmu_test_wang()
+{
+	printf("h");
 }

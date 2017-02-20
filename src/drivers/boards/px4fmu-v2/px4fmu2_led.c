@@ -45,6 +45,7 @@
 #include "board_config.h"
 
 #include <arch/board/board.h>
+#include <stdio.h>
 
 /*
  * Ideally we'd be able to get these from up_internal.h,
@@ -69,6 +70,8 @@ __EXPORT void led_init()
 
 __EXPORT void led_on(int led)
 {
+printf("\t led_on .\n");
+
 	if (led == 1) {
 		/* Pull down to switch on */
 		px4_arch_gpiowrite(GPIO_LED1, false);

@@ -103,6 +103,7 @@ int
 LED::ioctl(device::file_t *filp, int cmd, unsigned long arg)
 {
 	int result = OK;
+        //printf("\t led dev file ioctl.\n");
 
 	switch (cmd) {
 	case LED_ON:

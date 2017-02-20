@@ -721,6 +721,7 @@ bool handle_command(struct vehicle_status_s *status_local, const struct safety_s
 			uint8_t base_mode = (uint8_t)cmd->param1;
 			uint8_t custom_main_mode = (uint8_t)cmd->param2;
 			uint8_t custom_sub_mode = (uint8_t)cmd->param3;
+			mavlink_log_critical(&mavlink_log_pub, "wang cmd change mode");
 
 			transition_result_t arming_ret = TRANSITION_NOT_CHANGED;
 
@@ -758,6 +759,7 @@ bool handle_command(struct vehicle_status_s *status_local, const struct safety_s
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_AUTO) {
 					/* AUTO */
+ mavlink_log_critical(&mavlink_log_pub, "wang cmd change to auto mode");
 					if (custom_sub_mode > 0) {
 						switch(custom_sub_mode) {
 						case PX4_CUSTOM_SUB_MODE_AUTO_LOITER:
@@ -784,14 +786,17 @@ bool handle_command(struct vehicle_status_s *status_local, const struct safety_s
 							mavlink_log_critical(&mavlink_log_pub, "Unsupported auto mode");
 							break;
 						}
+mavlink_log_critical(&mavlink_log_pub, "wang mode change auto submode result %d", main_ret);
 
 					} else {
 						main_ret = main_state_transition(status_local, commander_state_s::MAIN_STATE_AUTO_MISSION, main_state_prev, &status_flags, &internal_state);
+				mavlink_log_critical(&mavlink_log_pub, "wang mode change auto mission result %d", main_ret);
 					}
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_ACRO) {
 					/* ACRO */
 					main_ret = main_state_transition(status_local, commander_state_s::MAIN_STATE_ACRO, main_state_prev, &status_flags, &internal_state);
+mavlink_log_critical(&mavlink_log_pub, "wang mode change acro result %d", main_ret);
 
 				} else if (custom_main_mode == PX4_CUSTOM_MAIN_MODE_RATTITUDE) {
 					/* RATTITUDE */
@@ -2069,6 +2074,7 @@ int commander_thread_main(int argc, char *argv[])
 		orb_check(global_position_sub, &updated);
 
 		if (updated) {
+mavlink_log_critical(&mavlink_log_pub, "wang gps updated, valid %d", status_flags.condition_global_position_valid);
 			/* position changed */
 			vehicle_global_position_s gpos;
 			orb_copy(ORB_ID(vehicle_global_position), global_position_sub, &gpos);
@@ -2078,10 +2084,12 @@ int commander_thread_main(int argc, char *argv[])
 			// XXX consolidate this with local position handling and timeouts after release
 			// but we want a low-risk change now.
 			if (status_flags.condition_global_position_valid) {
+mavlink_log_critical(&mavlink_log_pub, "wang gps was valid, curr eph %f, 2.5*threshhod is %f",(double)gpos.eph, (double)eph_threshold*2.5);
 				if (gpos.eph < eph_threshold * 2.5f) {
 					orb_copy(ORB_ID(vehicle_global_position), global_position_sub, &global_position);
 				}
 			} else {
+mavlink_log_critical(&mavlink_log_pub, "wang gps not valid, curr eph %f, threshhod is %f",(double) gpos.eph, (double )eph_threshold);
 				if (gpos.eph < eph_threshold) {
 					orb_copy(ORB_ID(vehicle_global_position), global_position_sub, &global_position);
 				}
