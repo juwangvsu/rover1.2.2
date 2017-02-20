@@ -1,0 +1,1331 @@
+/****************************************************************************
+version history
+2/9/2017 v1.2   control order: unexpired mavlink over rc input if both present. 
+		mavlink timeout timeout 5 secs, rc timeout 3 sec, 
+		for advanced mode, set mavlink timeout to -1 so rc will be
+		practially disabled. to set timeout value, use mavlink cmd
+		or subcommand mavtimeout and rctimeout
+
+		to change the rc transmitter, use rcmodel command, 1 for futuba
+		2 for iris. default is futuba
+
+2/8/2017 v1.1   add pwm mode, subcommand: auxpwm, showstatic, resetstatic
+		default now at pwm mode, the output is pwm from 0% to 100%
+		based on rc input. rc throttle dead zone 1200-1700
+		subcommand be careful to reset static variable fd, pwmfd 
+		to make sure restart of thread will be fine.a
+
+		pwm mode with mavlink command to be tested.
+
+2/7/2017: v1.0  fixed speed, throttle 100%, -100%, or 0
+
+copy right Ju Wang, Virginia Drone Service
+ *
+ *   Copyright (c) 2012-2016 PX4 Development Team. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name PX4 nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
+
+/**
+ * @file rover_commander.c
+ *
+ * Simple SD logger for flight data. Buffers new sensor values and
+ * does the heavy SD I/O in a low-priority worker thread.
+ *
+ * @author Lorenz Meier <lm@inf.ethz.ch>
+ * @author Anton Babushkin <anton.babushkin@me.com>
+ * @author Ban Siesta <bansiesta@gmail.com>
+ * @author Julian Oes <julian@oes.ch>
+ */
+
+#include <px4_config.h>
+#include <px4_defines.h>
+#include <px4_getopt.h>
+#include <px4_tasks.h>
+#include <px4_time.h>
+#include <px4_posix.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#ifdef __PX4_DARWIN
+#include <sys/param.h>
+#include <sys/mount.h>
+#else
+#include <sys/statfs.h>
+#endif
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <systemlib/err.h>
+#include <unistd.h>
+#include <drivers/drv_hrt.h>
+#include <math.h>
+#include <time.h>
+
+#include <uORB/uORB.h>
+#include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/control_state.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
+#include <uORB/topics/vehicle_rates_setpoint.h>
+#include <uORB/topics/actuator_outputs.h>
+#include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/vehicle_command.h>
+#include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/vehicle_local_position_setpoint.h>
+#include <uORB/topics/vehicle_global_position.h>
+#include <uORB/topics/position_setpoint_triplet.h>
+#include <uORB/topics/vehicle_gps_position.h>
+#include <uORB/topics/satellite_info.h>
+#include <uORB/topics/att_pos_mocap.h>
+#include <uORB/topics/vision_position_estimate.h>
+#include <uORB/topics/vehicle_global_velocity_setpoint.h>
+#include <uORB/topics/optical_flow.h>
+#include <uORB/topics/battery_status.h>
+#include <uORB/topics/differential_pressure.h>
+#include <uORB/topics/airspeed.h>
+#include <uORB/topics/rc_channels.h>
+#include <uORB/topics/esc_status.h>
+#include <uORB/topics/telemetry_status.h>
+#include <uORB/topics/distance_sensor.h>
+#include <uORB/topics/estimator_status.h>
+#include <uORB/topics/tecs_status.h>
+#include <uORB/topics/system_power.h>
+#include <uORB/topics/servorail_status.h>
+#include <uORB/topics/wind_estimate.h>
+#include <uORB/topics/vtol_vehicle_status.h>
+#include <uORB/topics/time_offset.h>
+#include <uORB/topics/mc_att_ctrl_status.h>
+#include <uORB/topics/ekf2_innovations.h>
+#include <uORB/topics/camera_trigger.h>
+#include <uORB/topics/ekf2_replay.h>
+#include <uORB/topics/vehicle_land_detected.h>
+#include <uORB/topics/commander_state.h>
+#include <uORB/topics/cpuload.h>
+#include <uORB/topics/input_rc.h>
+
+#include <systemlib/systemlib.h>
+#include <systemlib/param/param.h>
+#include <systemlib/perf_counter.h>
+#include <systemlib/git_version.h>
+#include <systemlib/printload.h>
+#include <systemlib/mavlink_log.h>
+#include <version/version.h>
+
+#include "../sdlog2/logbuffer.h"
+#include "../sdlog2/sdlog2_format.h"
+#include "../sdlog2/sdlog2_messages.h"
+#include <drivers/drv_gpio.h>
+#include "drivers/drv_pwm_output.h"
+
+#define	MAV_CMD_USER_1 31010 //subcommand of vehicle cmd, used for rover control here, this is defined in mavlink reference
+#define PX4_EPOCH_SECS 1234567890L
+
+#define SDLOG_MIN(X,Y) ((X) < (Y) ? (X) : (Y))
+#define ROVER_PWM_MODE 1
+#define ROVER_GPIO_MODE 2 
+static int rover_mode = ROVER_PWM_MODE;
+//static int rover_mode = ROVER_GPIO_MODE;
+static double  rover_version=1.1;
+static bool thread_pause = false;			
+static bool thread_running = false;			
+static bool main_thread_should_exit = false;	
+static int deamon_task;						
+static int fd=-1;						
+static int MAVCMD_TIMEOUT=5;//never expire : -1;
+static int RC_TIMEOUT=3;						
+static bool dbgflag=false;						
+static uint64_t start_time = 0;
+static bool check_timeout(const hrt_abstime & time, int timeoutval); 
+static bool check_timeout(const hrt_abstime& time, int timeoutval) 
+{
+    if (timeoutval==-1) return false;
+    if (hrt_elapsed_time(&time) > timeoutval*1000*1000) 
+    {
+	if (dbgflag)
+        printf("Waited for %d seconds without a message. Giving up.\n",timeoutval);
+        return true;
+    }
+    return false;
+}
+static void handle_channel5(int c5);
+static void handle_channel5(int c5)
+{
+/*sdlog2.c handle command topic:
+                struct vehicle_command_s cmd;
+                cmd.command = VEHICLE_CMD_PREFLIGHT_STORAGE;
+                cmd.param1 = -1;
+                cmd.param2 = -1;
+                cmd.param3 = 1;
+                orb_advertise(ORB_ID(vehicle_command), &cmd);
+Let rover_commander check rc input channel 5, if channel 5 is between 1400- 1500 , then send the log on topic, if between 1100- 1200 send off topic, otherwise don’t send topic. which will make sdlog2 to log again. Param3 =1 log on, param3=2 log off. This no send zone is to necessary to prevend flooding the topic. The rc receiver by default latch the most recent data from transmitter, so the rc input still exist even the transmitter is turned off, until a complete power cycle.  
+ 
+Channel 5 mapping:
+	--- iris transmitter: STD position, RTL =off channel5 = 1150 (off)
+				AUTO position, RTL = off, channel5=1450 (on)
+				LTR, RTL = off, channel5=1320 (no send)
+	--- futaba transmitter: up 1094
+				middle 1514
+				down  1914
+*/
+
+		static	hrt_abstime  prev_pubtime;
+                struct vehicle_command_s cmd;
+                cmd.command = vehicle_command_s::VEHICLE_CMD_PREFLIGHT_STORAGE;
+                cmd.param1 = -1;
+                cmd.param2 = -1;
+
+		if (c5>1000 && c5<1200) {
+                	cmd.param3 = 2;//off
+    			if (hrt_elapsed_time(&prev_pubtime) > 1000*1000) 
+                	{
+				orb_advertise(ORB_ID(vehicle_command), &cmd);
+				prev_pubtime=hrt_absolute_time();
+			}
+		}
+		if (c5>1400 && c5<1700) {
+                	cmd.param3 = 1;//on
+    			if (hrt_elapsed_time(&prev_pubtime) > 1000*1000) 
+                	{
+				orb_advertise(ORB_ID(vehicle_command), &cmd);
+				prev_pubtime=hrt_absolute_time();
+			}
+		}
+		// other cases no send
+}
+static void handle_channel6(int c6);
+static void handle_channel6(int c6)
+{
+/* iris remote c6 is the TILT knob. smallest about 990 (turn count-clockwise)
+   largest 2000 (clockwise)
+*/
+		if (c6>1500) {
+                	dbgflag = true;
+		}else{
+			dbgflag = false;
+		}
+}
+static void throttle_roll_to_skid(int throttle, int roll, int & aux1, int &  aux3,
+        int  & aux4, int & aux6);
+static void set_aux_pins(int auxpins[], int pinnum);
+static void throttle_roll_to_skid(int throttle, int roll, int & aux1, int & aux3,
+        int  & aux4, int &  aux6)
+{
+        if (roll > 2500 || roll < 500) return;
+        if (throttle > 2500 || throttle < 500) return;
+//      legit region of throttle and roll 500 - 2000
+
+//      roll has priority. if roll at nuetral, then consider throttle.
+        if (roll > 1699)//turn right
+        {
+                aux1 =1;
+                aux3 =0;
+                aux4=0;
+                aux6=1;
+        }
+        else if (roll < 1301)
+        { aux1 =0; aux3=1; aux4=1; aux6=0;}
+        else{
+                if (throttle > 1699)
+                {aux1 =1; aux3=0; aux4=1; aux6=0;}
+                else if(throttle <1201)
+                {aux1 =0; aux3=1; aux4=0; aux6=1;}
+                else{
+                        aux1 =0; aux3=0; aux4=0; aux6=0;
+                        //nuetral zone
+                }
+        }
+	if (dbgflag)
+        printf("aux1 %d aux3 %d aux4 %d aux6 %d\n", aux1, aux3, aux4, aux6);
+}
+
+static void set_aux_pins(int auxpins[], int pinnum)
+{
+
+        if(fd==-1){
+		printf("open file %s\n",PX4FMU_DEVICE_PATH);
+		fd = px4_open(PX4FMU_DEVICE_PATH, 0);
+        	if (fd < 0) {
+                	PX4_ERR("GPIO: open fail");
+                	return;
+        	}
+	}
+
+        //px4_ioctl(fd, GPIO_RESET, ~0);
+        for (int i =0; i< pinnum; i++){
+                //PX4_INFO("test io");
+                //px4_ioctl(fd, GPIO_SET_OUTPUT_HIGH, 1<<i);
+                if (auxpins[i]==0) px4_ioctl(fd, GPIO_SET_OUTPUT_LOW, 1<<i);
+                else px4_ioctl(fd, GPIO_SET_OUTPUT_HIGH, 1<<i);
+        }
+	if (dbgflag)
+        printf("auxpins[0] %d auxpins[2] %d auxpins[3] %d auxpins[5] %d\n", auxpins[0], auxpins[2], auxpins[3], auxpins[5]);
+//        printf("set_aux_pins: auxpins[0] %d \n", auxpins[0]);
+//	px4_close(fd);
+}
+#define PWM_OUTPUT1_DEVICE_PATH "/dev/pwm_output1"
+enum PortMode {
+        PORT_MODE_UNSET = 0,
+        PORT_FULL_GPIO,
+        PORT_FULL_SERIAL,
+        PORT_FULL_PWM,
+        PORT_GPIO_AND_SERIAL,
+        PORT_PWM_AND_SERIAL,
+        PORT_PWM_AND_GPIO,
+        PORT_PWM4,
+        PORT_PWM3,
+        PORT_PWM2,
+        PORT_PWM1,
+        PORT_PWM3CAP1,
+        PORT_PWM2CAP2,
+        PORT_CAPTURE,
+};
+extern int
+fmu_new_mode(PortMode new_mode);
+
+#define FUTUBA_MIN 1094
+#define FUTUBA_MAX 1934
+#define IRIS_MIN 990
+#define IRIS_MAX 2000 
+#define FUTUBA_TRANSMITTER 1
+#define IRIS_TRANSMITTER 2
+static int rc_transmitter=FUTUBA_TRANSMITTER;
+extern void fmu_test_wang();
+extern int fmu_main(int argc, char *argv[]);
+void calc_mask_pwm(int & set_mask, int auxpwm1[],int throttle, int auxpins[]);
+void calc_mask_pwm(int & set_mask, int auxpwm1[],int throttle, int auxpins[])
+{
+//normalize throttle to [0 2000]
+//throttle from rc input is roughly iris transmitter 990 - 2000 
+// 1094-1934 futuba transmitter
+//rc transmitter, valid forward throttle 1700 - 2000, reverse 900 - 1200
+	int normalized_throttle=0;
+	int uprange,lowrange;
+	if (rc_transmitter== FUTUBA_TRANSMITTER){
+		uprange=FUTUBA_MAX-1699;
+		lowrange=1200-FUTUBA_MIN;
+	}
+	else{
+		uprange=IRIS_MAX-1699;
+		lowrange=1200-IRIS_MIN;
+	}
+	//forward throttle:
+	if (throttle > 1699)
+		normalized_throttle= 2000 * (fmax(throttle-1699,0))/uprange;
+	if (throttle < 1201)
+		normalized_throttle= - 2000 * (throttle-1200)/lowrange;
+	normalized_throttle=fmin(normalized_throttle, 2000);//cap value 2000
+	if (normalized_throttle < 100) normalized_throttle =0; //clip to zero if small value
+
+	set_mask=0;
+	for (int i=0; i<6; i++){
+	   if (auxpins[i]){
+		set_mask = set_mask | (1<<i);
+		auxpwm1[i]=normalized_throttle;
+	    }
+	    else auxpwm1[i]=0;
+	}
+	if (dbgflag)
+	printf ("calc_mask_pwm: throttle input %d, normalized thr %d, set_mask %d c1 %d c2 %d c3 %d c4 %d c5 %d c6 %d\n",throttle, normalized_throttle, set_mask,auxpwm1[0],auxpwm1[1],auxpwm1[2],auxpwm1[3],auxpwm1[4],auxpwm1[5]);	
+}
+
+void set_gpio_mode();
+void set_gpio_mode(){
+	printf("setting to gpio mode\n");
+	PortMode new_mode = PORT_FULL_GPIO;
+ 	int ret = fmu_new_mode(new_mode);
+ 	if (ret!=OK) printf("fmu mode switch to gpio fail\n");
+}
+void set_pwm_mode();
+void set_pwm_mode(){
+//the following code see px4fmu/fmu.cpp
+	printf("setting to pwm mode\n");
+ 	PortMode new_mode = PORT_FULL_PWM;
+ 	int ret = fmu_new_mode(new_mode);
+ 	if (ret!=OK) printf("fmu mode switch to mode_pwm fail\n");
+}
+static int pwmfd=-1;
+void set_aux_pwm(int set_mask, int pwm_value[]);
+void set_aux_pwm(int set_mask, int pwm_value[])
+{
+//const char *dev = PWM_OUTPUT0_DEVICE_PATH;
+const char *dev2 = PWM_OUTPUT1_DEVICE_PATH;
+        int ret;
+
+//the following code see px4fmu/fmu.cpp
+// PortMode new_mode = PORT_FULL_PWM;
+ //ret = fmu_new_mode(new_mode);
+ //if (ret!=OK) printf("fmu mode switch to mode_pwm fail\n");
+
+
+//the following code see pwm.c
+
+        if (pwmfd<0)
+		pwmfd = open(dev2, 0);
+
+        if (pwmfd < 0) {
+		thread_running=false;
+                err(1, "can't open %s", dev2);
+		// err() will terminate the task, so set the static varible
+		// to allow restart of task
+		
+        }
+
+	if (dbgflag)
+	printf ("set_aux_pwm\n");	
+
+        ret = ioctl(pwmfd, PWM_SERVO_SET_ARM_OK, 0);
+
+        if (ret != OK) {
+                  err(1, "PWM_SERVO_SET_ARM_OK");
+                }
+
+                /* tell IO that the system is armed (it will output values if safety is off) */
+        ret = ioctl(pwmfd, PWM_SERVO_ARM, 0);
+
+       if (ret != OK) {
+                        err(1, "PWM_SERVO_ARM");
+                }
+
+	ret = ioctl(pwmfd, PWM_SERVO_SET_UPDATE_RATE, 500);
+        if (ret != OK) {
+             err(1, "PWM_SERVO_SET_UPDATE_RATE (check rate for sanity)");
+         }
+
+         ret = ioctl(pwmfd, PWM_SERVO_SET_SELECT_UPDATE_RATE, 65535);
+         if (ret != OK) {
+             err(1, "PWM_SERVO_SET_SELECT_UPDATE_RATE");
+         }
+// now set the pwm output
+	int pwmval;
+        for (unsigned i = 0; i < 6; i++) {
+                 if (set_mask & 1 << i) pwmval=pwm_value[i];
+		 else pwmval = 0; 
+                 ret = ioctl(pwmfd, PWM_SERVO_SET(i), pwmval);
+                 if (ret != OK) {
+                        err(1, "PWM_SERVO_SET(%d)", i);
+                  }
+         }
+	if (dbgflag)
+	printf ("aux_pwm val c1 %d c2 %d c3 %d c4 %d c5 %d c6 %d\n",pwm_value[0],pwm_value[1],pwm_value[2],pwm_value[3],pwm_value[4],pwm_value[5]);	
+
+
+}
+
+//static bool copy_if_updated(orb_id_t topic, int *handle, void *buffer);
+//static bool copy_if_updated_multi(orb_id_t topic, int multi_instance, int *handle, void *buffer);
+
+/**
+ * Mainloop of sd log deamon.
+ */
+int rover_commander_thread_main(int argc, char *argv[]);
+
+/**
+ * Print the correct usage.
+ */
+static void rover_commander_usage(const char *reason);
+
+/**
+ * Print the current status.
+ */
+static void rover_commander_status(void);
+
+/**
+ * Start logging: create new file and start log writer thread.
+ */
+static void rover_commander_start_log(void);
+
+/**
+ * Stop logging: stop log writer thread and close log file.
+ */
+static void rover_commander_stop_log(void);
+
+extern void handle_command(struct vehicle_command_s *cmd);
+
+extern void handle_status(struct vehicle_status_s *cmd);
+
+static void
+rover_commander_usage(const char *reason)
+{
+	if (reason) {
+		fprintf(stderr, "%s\n", reason);
+	}
+
+	PX4_WARN("usage for testing aux output: rover_commander {setaux 7|resume|dbgtoggle} \n"
+		"setaux 7: pause thread, set aux output to 000111\n"
+		"auxpwm 2000 7: pause thread, set aux output to 000111\n"
+		"resume: resume paused thread\n"
+		"dbgtoggle: turn on/off dbg info\n"
+		"rcmodel 1|2: 1 for futuba, 2 for iris\n"
+		"notice that fd must be set to -1 in these code to reopen the" 
+		"io port\n");
+	PX4_WARN("usage: rover_commander {start|stop|status|on|off} [-r <log rate>] [-b <buffer size>] -e -a -t -x\n"
+		 "\t-r\tLog rate in Hz, 0 means unlimited rate\n"
+		 "\t-b\tLog buffer size in KiB, default is 8\n"
+		 "\t-e\tEnable logging by default (if not, can be started by command)\n"
+		 "\t-a\tLog only when armed (can be still overriden by command)\n"
+		 "\t-t\tUse date/time for naming log directories and files\n"
+		 "\t-x\tExtended logging");
+}
+
+/**
+ * The logger deamon app only briefly exists to start
+ * the background job. The stack size assigned in the
+ * Makefile does only apply to this management task.
+ *
+ * The actual stack size should be set in the call
+ * to task_spawn().
+ */
+extern "C" __EXPORT int rover_commander_main(int argc, char *argv[]);
+
+int rover_commander_main(int argc, char *argv[])
+{
+	if (argc < 2) {
+		rover_commander_usage("missing command");
+		return 1;
+	}
+
+	if (!strcmp(argv[1], "start")) {
+
+// code from fmu.cpp to set fmu mode
+		if (fd>0) {
+			px4_close(fd);
+			fd=-1;
+		}
+		if (rover_mode==ROVER_GPIO_MODE)
+			set_gpio_mode();
+		else
+			set_pwm_mode();
+/*
+		PortMode new_mode = PORT_FULL_GPIO;
+ 		int ret = fmu_new_mode(new_mode);
+ 		if (ret!=OK) printf("fmu mode switch to gpio fail\n");
+*/
+
+		if (thread_running) {
+			PX4_WARN("already running");
+			/* this is not an error */
+			return 0;
+		}
+
+		// get sdlog priority boost parameter. This can be used to avoid message drops
+		// in the log file. However, it considered to be used only for developers.
+		param_t prio_boost_handle = param_find("SDLOG_PRIO_BOOST");
+		int prio_boost = 0;
+		param_get(prio_boost_handle, &prio_boost);
+		int task_priority = SCHED_PRIORITY_DEFAULT - 30;
+
+		switch(prio_boost) {
+			case 1:
+				task_priority = SCHED_PRIORITY_DEFAULT;
+				break;
+			case 2:
+				task_priority = SCHED_PRIORITY_DEFAULT + (SCHED_PRIORITY_MAX - SCHED_PRIORITY_DEFAULT) / 2;
+				break;
+			case 3:
+				task_priority = SCHED_PRIORITY_MAX;
+				break;
+			default:
+				// use default priority already set above
+				break;
+		}
+		PX4_INFO("rover_commander main starting");
+
+		main_thread_should_exit = false;
+		deamon_task = px4_task_spawn_cmd("rover_commander",
+						 SCHED_DEFAULT,
+						 task_priority,
+						 3400,
+						 rover_commander_thread_main,
+						 (char * const *)argv);
+
+		/* wait for the task to launch */
+		unsigned const max_wait_us = 1000000;
+		unsigned const max_wait_steps = 2000;
+
+		unsigned i;
+		for (i = 0; i < max_wait_steps; i++) {
+			usleep(max_wait_us / max_wait_steps);
+			if (thread_running) {
+				break;
+			}
+		}
+
+		return !(i < max_wait_steps);
+	}
+
+	if (!strcmp(argv[1], "stop")) {
+		if (!thread_running) {
+			PX4_WARN("not started");
+		}
+
+//notify the thread to stop, and wait 100 ms 
+		main_thread_should_exit = true;
+		usleep(100000);
+
+// first close set all output to 0s
+		px4_close(fd); //the static value fd still exist even if the thread are stopped. so force close the fd and reset to -1
+		fd=-1;
+		int tmp_auxpins[12]={0,0,0,0,0,0,0,0,0,0,0,0};
+		set_aux_pins(tmp_auxpins, 12);
+
+//now close fd and reset it to -1
+		px4_close(fd);
+		fd=-1;
+
+//now close pwmfd and reset it to -1, necessary when start again
+		px4_close(pwmfd);
+		pwmfd=-1;
+		//main_thread_should_exit = true;
+	
+		//set thread_running to false so we can restart it, otherwise
+		//restart will not work since it may think the thread is running
+		// in normal case if the thread terminate properly, the thread
+		//will set thread_running to false. but if thread is terminated
+		//due to error/exception, thread_running might still be true,
+		//so it is safe to force it to false here.
+		thread_running=false;
+		return 0;
+	}
+
+	if (!strcmp(argv[1], "ver")) {
+		printf("rover_commander version v%3f\n",rover_version);
+		return 0;
+	}
+	if (!strcmp(argv[1], "mavtimeout")) {
+		MAVCMD_TIMEOUT=atoi(argv[2]);
+		printf("MAVCMD_TIMEOUT  %d\n",MAVCMD_TIMEOUT);
+		return 0;
+	}
+	if (!strcmp(argv[1], "rctimeout")) {
+		RC_TIMEOUT=atoi(argv[2]);
+		printf("RC_TIMEOUT  %d\n",RC_TIMEOUT);
+		return 0;
+	}
+	if (!strcmp(argv[1], "dbgtoggle")) {
+		dbgflag = !dbgflag;
+		return 0;
+	}
+	if (!strcmp(argv[1], "auxpwm")) {
+		int pwm_value[6]={0,0,0,0,0,0};
+		int set_mask=atoi(argv[3]);
+		for (int k=0;k<6;k++)
+			pwm_value[k] = atoi(argv[2]);
+		set_pwm_mode();
+		set_aux_pwm(set_mask, pwm_value);
+		px4_close(pwmfd);
+		pwmfd=-1;
+		return 0;
+	}
+	if (!strcmp(argv[1], "resume")) {
+		thread_pause = false;
+		px4_close(fd);
+		fd=-1;
+		px4_close(pwmfd);
+		pwmfd=-1;
+		return 0;
+	}
+	if (!strcmp(argv[1], "rcmode")) {
+		rc_transmitter = atoi(argv[2]);
+		return 0;
+	}
+	if (!strcmp(argv[1], "showstatic")) {
+		printf("thread_running %d, thread_pause %d, fd %d, pwmfd %d\n",thread_running, thread_pause, fd, pwmfd);
+		return 0;
+	}
+	if (!strcmp(argv[1], "resetstatic")) {
+		thread_running=false;
+		printf("thread_running %d, thread_pause %d, fd %d, pwmfd %d\n",thread_running, thread_pause, fd, pwmfd);
+		return 0;
+	}
+	if (!strcmp(argv[1], "setaux")) {
+		
+		px4_close(fd); //the static value fd still exist even if the thread are stopped. so force close the fd and reset to -1
+		fd=-1;
+		printf("%s %s\n",argv[1], argv[2]);
+		int auxval = atoi(argv[2]);
+		int tmp_auxpins[12]={1,1,1,1,1,0,0,0,0,0,0,0};
+
+		for (int i=0;i<6;i++){
+			if ((auxval & (1<<i))>0) 
+				tmp_auxpins[i]=1;
+			else tmp_auxpins[i]=0;	
+		}
+
+		for (int i=0;i<6;i++)
+		printf("c%d %d ",i, tmp_auxpins[i]);
+		thread_pause = true;
+		set_aux_pins(tmp_auxpins, 12);
+		//usleep(2000000);	
+		//thread_pause = false;
+		//px4_close(fd);
+		return 0;
+	}
+	if (!thread_running) {
+		PX4_WARN("not started\n");
+		return 1;
+	}
+	if (!strcmp(argv[1], "status")) {
+		rover_commander_status();
+		return 0;
+	}
+
+	if (!strcmp(argv[1], "on")) {
+		struct vehicle_command_s cmd;
+		cmd.command = vehicle_command_s::VEHICLE_CMD_PREFLIGHT_STORAGE;
+		cmd.param1 = -1;
+		cmd.param2 = -1;
+		cmd.param3 = 1;
+		orb_advertise(ORB_ID(vehicle_command), &cmd);
+		return 0;
+	}
+
+	if (!strcmp(argv[1], "off")) {
+		struct vehicle_command_s cmd;
+		//cmd.command = VEHICLE_CMD_PREFLIGHT_STORAGE;
+		cmd.param1 = -1;
+		cmd.param2 = -1;
+		cmd.param3 = 2;
+		orb_advertise(ORB_ID(vehicle_command), &cmd);
+		return 0;
+	}
+
+	rover_commander_usage("unrecognized command");
+	return 1;
+}
+
+
+void rover_commander_start_log()
+{
+
+
+	/* initialize statistics counter */
+	start_time = hrt_absolute_time();
+        fd = px4_open(PX4FMU_DEVICE_PATH, 0);
+        if (fd < 0) {
+                PX4_ERR("GPIO: open fail");
+                return;
+        }
+
+}
+
+void rover_commander_stop_log()
+{
+	/* disabling the logging will trigger the skipped count to increase,
+	 * so we take a local copy before interrupting the disk I/O.
+	 */
+
+	rover_commander_status();
+        px4_close(fd);
+}
+
+
+int rover_commander_thread_main(int argc, char *argv[])
+{
+	/* default log rate: 50 Hz */
+	int32_t log_rate = 50;
+	/* enable logging on start (-e option) */
+	bool log_on_start = false;
+	/* enable logging when armed (-a option) */
+
+
+#ifdef __PX4_NUTTX
+	/* the NuttX optarg handler does not
+	 * ignore argv[0] like the POSIX handler
+	 * does, nor does it deal with non-flag
+	 * verbs well. So we Remove the application
+	 * name and the verb.
+	 */
+	argc -= 2;
+	argv += 2;
+#endif
+
+	int ch;
+
+	/* don't exit from getopt loop to leave getopt global variables in consistent state,
+	 * set error flag instead */
+	bool err_flag = false;
+
+	int myoptind = 1;
+	const char *myoptarg = NULL;
+	PX4_WARN("rover_commander thread starting");
+	while ((ch = px4_getopt(argc, argv, "r:b:eatx", &myoptind, &myoptarg)) != EOF) {
+		switch (ch) {
+		case 'r': {
+				unsigned long r = strtoul(myoptarg, NULL, 10);
+
+				if (r <= 0) {
+					r = 1;
+				}
+
+				log_rate = r;
+			}
+			break;
+
+		case 'b': {
+				unsigned long s = strtoul(myoptarg, NULL, 10);
+
+				if (s < 1) {
+					s = 1;
+				}
+
+			}
+			break;
+
+		case 'e':
+			log_on_start = true;
+			break;
+
+		case 'a':
+			break;
+
+		case 't':
+			rover_commander_stop_log();
+			break;
+
+		case 'x':
+			break;
+
+		case '?':
+			if (optopt == 'c') {
+				PX4_WARN("option -%c requires an argument", optopt);
+
+			} else if (isprint(optopt)) {
+				PX4_WARN("unknown option `-%c'", optopt);
+
+			} else {
+				PX4_WARN("unknown option character `\\x%x'", optopt);
+			}
+			err_flag = true;
+			break;
+
+		default:
+			PX4_WARN("unrecognized flag");
+			err_flag = true;
+			break;
+		}
+	}
+
+	if (err_flag) {
+		rover_commander_usage(NULL);
+	}
+
+
+	/* interpret logging params */
+	int32_t param_log_rate = -1;
+	param_t log_rate_ph = param_find("SDLOG_RATE");
+
+	if (log_rate_ph != PARAM_INVALID) {
+		param_get(log_rate_ph, &param_log_rate);
+
+		if (param_log_rate > 0) {
+
+			/* we can't do more than ~ 500 Hz, even with a massive buffer */
+			if (param_log_rate > 250) {
+				param_log_rate = 250;
+			}
+
+		} else if (param_log_rate == 0) {
+			/* we need at minimum 10 Hz to be able to see anything */
+			param_log_rate = 10;
+		}
+	}
+
+	// if parameter was provided use it, if not use command line argument
+	log_rate = param_log_rate > -1 ? param_log_rate : log_rate;
+
+
+	param_t log_gpstime_ph = param_find("SDLOG_GPSTIME");
+
+	if (log_gpstime_ph != PARAM_INVALID) {
+
+		int32_t param_log_gpstime;
+		param_get(log_gpstime_ph, &param_log_gpstime);
+
+		if (param_log_gpstime > 0) {
+		} else if (param_log_gpstime == 0) {
+		}
+		/* any other value means to ignore the parameter, so no else case */
+
+	}
+
+	param_t log_utc_offset = param_find("SDLOG_UTC_OFFSET");
+
+	if ( log_utc_offset != PARAM_INVALID ) {
+	    int32_t param_utc_offset;
+	    param_get(log_utc_offset, &param_utc_offset);
+	}
+
+
+	struct vehicle_status_s buf_status;
+	memset(&buf_status, 0, sizeof(buf_status));
+
+	struct vehicle_gps_position_s buf_gps_pos;
+	memset(&buf_gps_pos, 0, sizeof(buf_gps_pos));
+
+	struct vehicle_command_s buf_cmd;
+	memset(&buf_cmd, 0, sizeof(buf_cmd));
+
+	struct commander_state_s buf_commander_state;
+	memset(&buf_commander_state, 0, sizeof(buf_commander_state));
+
+
+	/* warning! using union here to save memory, elements should be used separately! */
+	union {
+		struct vehicle_command_s cmd;
+		struct sensor_combined_s sensor;
+		struct vehicle_attitude_s att;
+		struct vehicle_attitude_setpoint_s att_sp;
+		struct vehicle_rates_setpoint_s rates_sp;
+		struct actuator_outputs_s act_outputs;
+		struct actuator_controls_s act_controls;
+		struct actuator_controls_s act_controls1;
+		struct vehicle_local_position_s local_pos;
+		struct vehicle_local_position_setpoint_s local_pos_sp;
+		struct vehicle_global_position_s global_pos;
+		struct position_setpoint_triplet_s triplet;
+		struct att_pos_mocap_s att_pos_mocap;
+		struct vision_position_estimate_s vision_pos;
+		struct optical_flow_s flow;
+		struct rc_channels_s rc;
+		struct differential_pressure_s diff_pres;
+		struct airspeed_s airspeed;
+		struct esc_status_s esc;
+		struct vehicle_global_velocity_setpoint_s global_vel_sp;
+		struct battery_status_s battery;
+		struct telemetry_status_s telemetry;
+		struct distance_sensor_s distance_sensor;
+		struct estimator_status_s estimator_status;
+		struct tecs_status_s tecs_status;
+		struct system_power_s system_power;
+		struct servorail_status_s servorail_status;
+		struct satellite_info_s sat_info;
+		struct wind_estimate_s wind_estimate;
+		struct vtol_vehicle_status_s vtol_status;
+		struct time_offset_s time_offset;
+		struct mc_att_ctrl_status_s mc_att_ctrl_status;
+		struct control_state_s ctrl_state;
+		struct ekf2_innovations_s innovations;
+		struct camera_trigger_s camera_trigger;
+		struct ekf2_replay_s replay;
+		struct vehicle_land_detected_s land_detected;
+		struct cpuload_s cpuload;
+		struct vehicle_gps_position_s dual_gps_pos;
+	} buf;
+
+	memset(&buf, 0, sizeof(buf));
+
+	/* log message buffer: header + body */
+#pragma pack(push, 1)
+	struct {
+		LOG_PACKET_HEADER;
+		union {
+			struct log_TIME_s log_TIME;
+			struct log_ATT_s log_ATT;
+			struct log_ATSP_s log_ATSP;
+			struct log_IMU_s log_IMU;
+			struct log_SENS_s log_SENS;
+			struct log_LPOS_s log_LPOS;
+			struct log_LPSP_s log_LPSP;
+			struct log_GPS_s log_GPS;
+			struct log_ATTC_s log_ATTC;
+			struct log_STAT_s log_STAT;
+			struct log_VTOL_s log_VTOL;
+			struct log_RC_s log_RC;
+			struct log_OUT_s log_OUT;
+			struct log_AIRS_s log_AIRS;
+			struct log_ARSP_s log_ARSP;
+			struct log_FLOW_s log_FLOW;
+			struct log_GPOS_s log_GPOS;
+			struct log_GPSP_s log_GPSP;
+			struct log_ESC_s log_ESC;
+			struct log_GVSP_s log_GVSP;
+			struct log_BATT_s log_BATT;
+			struct log_DIST_s log_DIST;
+			struct log_TEL_s log_TEL;
+			struct log_EST0_s log_EST0;
+			struct log_EST1_s log_EST1;
+			struct log_EST2_s log_EST2;
+			struct log_EST3_s log_EST3;
+			struct log_PWR_s log_PWR;
+			struct log_MOCP_s log_MOCP;
+			struct log_VISN_s log_VISN;
+			struct log_GS0A_s log_GS0A;
+			struct log_GS0B_s log_GS0B;
+			struct log_GS1A_s log_GS1A;
+			struct log_GS1B_s log_GS1B;
+			struct log_TECS_s log_TECS;
+			struct log_WIND_s log_WIND;
+			struct log_ENCD_s log_ENCD;
+			struct log_TSYN_s log_TSYN;
+			struct log_MACS_s log_MACS;
+			struct log_CTS_s log_CTS;
+			struct log_EST4_s log_INO1;
+			struct log_EST5_s log_INO2;
+			struct log_CAMT_s log_CAMT;
+			struct log_RPL1_s log_RPL1;
+			struct log_RPL2_s log_RPL2;
+			struct log_EST6_s log_INO3;
+			struct log_RPL3_s log_RPL3;
+			struct log_RPL4_s log_RPL4;
+			struct log_RPL5_s log_RPL5;
+			struct log_LAND_s log_LAND;
+			struct log_RPL6_s log_RPL6;
+			struct log_LOAD_s log_LOAD;
+			struct log_DPRS_s log_DPRS;
+		} body;
+	} log_msg = {
+		LOG_PACKET_HEADER_INIT(0)
+	};
+#pragma pack(pop)
+	memset(&log_msg.body, 0, sizeof(log_msg.body));
+
+	struct {
+		int cmd_sub;
+		int status_sub;
+		int vtol_status_sub;
+		int sensor_sub;
+		int att_sub;
+		int att_sp_sub;
+		int rates_sp_sub;
+		int act_outputs_sub;
+		int act_outputs_1_sub;
+		int act_controls_sub;
+		int act_controls_1_sub;
+		int local_pos_sub;
+		int local_pos_sp_sub;
+		int global_pos_sub;
+		int triplet_sub;
+		int gps_pos_sub[2];
+		int sat_info_sub;
+		int att_pos_mocap_sub;
+		int vision_pos_sub;
+		int flow_sub;
+		int rc_sub;
+		int airspeed_sub;
+		int esc_sub;
+		int global_vel_sp_sub;
+		int battery_sub;
+		int telemetry_subs[ORB_MULTI_MAX_INSTANCES];
+		int distance_sensor_sub;
+		int estimator_status_sub;
+		int tecs_status_sub;
+		int system_power_sub;
+		int servorail_status_sub;
+		int wind_sub;
+		int tsync_sub;
+		int mc_att_ctrl_status_sub;
+		int ctrl_state_sub;
+		int innov_sub;
+		int cam_trig_sub;
+		int replay_sub;
+		int land_detected_sub;
+		int commander_state_sub;
+		int cpuload_sub;
+		int diff_pres_sub;
+	} subs;
+
+	subs.cmd_sub = -1;
+	subs.status_sub = -1;
+	subs.vtol_status_sub = -1;
+	subs.gps_pos_sub[0] = -1;
+	subs.gps_pos_sub[1] = -1;
+	subs.sensor_sub = -1;
+	subs.att_sub = -1;
+	subs.att_sp_sub = -1;
+	subs.rates_sp_sub = -1;
+	subs.act_outputs_sub = -1;
+	subs.act_outputs_1_sub = -1;
+	subs.act_controls_sub = -1;
+	subs.act_controls_1_sub = -1;
+	subs.local_pos_sub = -1;
+	subs.local_pos_sp_sub = -1;
+	subs.global_pos_sub = -1;
+	subs.triplet_sub = -1;
+	subs.att_pos_mocap_sub = -1;
+	subs.vision_pos_sub = -1;
+	subs.flow_sub = -1;
+	subs.rc_sub = -1;
+	subs.airspeed_sub = -1;
+	subs.esc_sub = -1;
+	subs.global_vel_sp_sub = -1;
+	subs.battery_sub = -1;
+	subs.distance_sensor_sub = -1;
+	subs.estimator_status_sub = -1;
+	subs.tecs_status_sub = -1;
+	subs.system_power_sub = -1;
+	subs.servorail_status_sub = -1;
+	subs.wind_sub = -1;
+	subs.tsync_sub = -1;
+	subs.mc_att_ctrl_status_sub = -1;
+	subs.ctrl_state_sub = -1;
+	subs.innov_sub = -1;
+	subs.cam_trig_sub = -1;
+	subs.replay_sub = -1;
+	subs.land_detected_sub = -1;
+	subs.commander_state_sub = -1;
+	subs.cpuload_sub = -1;
+	subs.diff_pres_sub = -1;
+        
+	/* add new topics HERE */
+
+
+	for (unsigned i = 0; i < ORB_MULTI_MAX_INSTANCES; i++) {
+		subs.telemetry_subs[i] = -1;
+	}
+
+	subs.sat_info_sub = -1;
+	printf("subs %d\n", subs.innov_sub);
+	/* initialize thread synchronization */
+	if (log_on_start) {
+		/* check GPS topic to get GPS time */
+
+		rover_commander_start_log();
+	}
+
+	thread_running = true;
+
+
+			// TODO Remove hardcoded rate!
+		int throttle=0, roll=0;
+		int throttle2=0, roll2=0;
+                int auxpins1[12]={1,1,0,1,1,0,0,0,0,0,0,0};
+                int auxpins2[12]={1,1,0,1,1,0,0,0,0,0,0,0};
+                int auxpwm1[12]={1,1,0,1,1,0,0,0,0,0,0,0};
+                int auxpwm2[12]={1,1,0,1,1,0,0,0,0,0,0,0};
+                int aux1=0 , aux3=0 , aux4=0 , aux6=0;
+               	hrt_abstime sstart_time;
+               	hrt_abstime sstart_time2;
+               	sstart_time = hrt_absolute_time();
+               	sstart_time2 = hrt_absolute_time();
+                struct vehicle_command_s container2;
+                memset(&container2, 0, sizeof(container2));
+                struct input_rc_s container;
+                memset(&container, 0, sizeof(container));
+                memset(auxpins1, 0, sizeof(auxpins1));
+                memset(auxpins2, 0, sizeof(auxpins2));
+
+      	int sub = -1;
+      	int sub2 = -1;
+      	orb_id_t ID;
+      	orb_id_t ID2;
+	bool updated;
+	bool updated2;
+        sub2 = orb_subscribe(ORB_ID(vehicle_command));
+        ID2 = ORB_ID(vehicle_command);
+        sub = orb_subscribe(ORB_ID(input_rc));
+        ID = ORB_ID(input_rc);
+	if (rover_mode== ROVER_PWM_MODE)
+		set_pwm_mode();
+	while (!main_thread_should_exit) {
+		if (dbgflag)
+			printf("-----------------------------------------------\n");
+		if (thread_pause) {
+			printf("thread pause\n");
+			usleep (3000000);
+			continue;
+		}
+
+		/* Check below's topics first even if logging is not enabled.
+		 * We need to do this because should only poll further below if we're
+		 * actually going to orb_copy the data after the poll. */
+
+		/* --- VEHICLE COMMAND - LOG MANAGEMENT --- */
+
+		/* write time stamp message */
+		log_msg.msg_type = LOG_TIME_MSG;
+		log_msg.body.log_TIME.t = hrt_absolute_time();
+		
+//		PX4_INFO("rover_commander thread looping\n");
+		/* --- VTOL VEHICLE STATUS --- */
+			/* --- GPS POSITION - UNIT #1 --- */
+			/* --- GPS POSITION - UNIT #2 --- */
+		usleep(100000);
+// check rc input
+ 		orb_check(sub,&updated);
+		usleep(500); 
+                orb_copy(ID,sub,&container);
+                if (updated){
+                	sstart_time = hrt_absolute_time();
+                	throttle=container.values[2];
+                	roll=container.values[0];
+			if (dbgflag)
+				printf("rc input c1 %d c2 %d c3 %d c4 %d c5 %d c6 %d\n", container.values[0], container.values[1],container.values[2],container.values[3],container.values[4], container.values[5]);
+			handle_channel5(container.values[4]);
+			handle_channel6(container.values[5]);
+			aux1=aux3=aux4=aux6=0;
+                	throttle_roll_to_skid(throttle, roll, aux1,aux3,aux4,aux6);
+                	auxpins1[0] = aux1; auxpins1[2] = aux3;
+                	auxpins1[3] = aux4; auxpins1[5] = aux6;
+			//aux1=auxpins[1];	
+		}
+			// if older than 20 sec, set to zero 
+                else{
+                        if (check_timeout(sstart_time,20)) {
+                                memset(&container, 0, sizeof(container));
+                		memset(auxpins1, 0, sizeof(auxpins1));
+				aux1=aux3=aux4=aux6=0;
+                        }
+                }
+
+//now check mavlink cmd, rc input yield to mavlink cmd 
+
+                orb_check(sub2,&updated2);
+		usleep(500); 
+                orb_copy(ID2,sub2,&container2);
+
+			//only rcinput or command MAV_CMD_USER_1 should be considered here.
+			//other command should be treated as no command.
+		//if (updated2 && (container2.command !=MAV_CMD_USER_1))
+		//	updated2=false;
+
+                if (updated)
+                	sstart_time = hrt_absolute_time();
+                //if (updated2)
+                if (updated2 && (container2.command ==MAV_CMD_USER_1))
+                	sstart_time2 = hrt_absolute_time();
+
+                if (check_timeout(sstart_time2, MAVCMD_TIMEOUT)) {
+		// if mavlink cmd timeout, set throttle2 to zero
+                                memset(&container2, 0, sizeof(container2));
+                		memset(auxpins2, 0, sizeof(auxpins2));
+                		throttle2=0;
+                		roll2=0;
+				aux1=aux3=aux4=aux6=0;
+				set_aux_pins(auxpins2,12); 
+                }
+
+		if ((updated2 && (container2.command ==MAV_CMD_USER_1)) ) {
+		//if updated2 and command is MAV_CMD_USER_1, data from orb_copy is good, so change throttle2 roll2, otherwise don't change and use the current value. if no update2will eventually timeout and change throttle2 =0, see code above.
+                	throttle2=container2.param1;
+                	roll2=container2.param2;
+		}
+
+		if (dbgflag)
+		printf("vehicle cmd: updated2 %d param1 %d param2 %d throttle2 %d roll2 %d\n\tthe throttle2 might be one of the following three: fresh data from a new update, data from a previous update before its expiration time, or zeros", updated2, (int) container2.param1,(int)container2.param2,(int) throttle2, (int) roll2);
+		aux1=aux3=aux4=aux6=0;
+                throttle_roll_to_skid(throttle2, roll2, aux1,aux3,aux4,aux6);
+                auxpins2[0] = aux1; auxpins2[2] = aux3;
+                auxpins2[3] = aux4; auxpins2[5] = aux6;
+                if ((updated2 &&  (container2.command ==MAV_CMD_USER_1)) || !check_timeout(sstart_time2,MAVCMD_TIMEOUT)) {
+		// use mavlink cmd if it is not expired, -1 for never expire
+			if (dbgflag)
+			printf("use vehicle cmd \n");
+			if (rover_mode==ROVER_GPIO_MODE){
+				if (dbgflag)
+				  printf("rover gpio mode\n");
+				set_aux_pins(auxpins2,12); //if mavlink cmd present, do this, otherwise skip set pins and use whatever input_rc give
+			}
+			else if(rover_mode==ROVER_PWM_MODE){
+				if (dbgflag)
+				  printf("rover pwm mode\n");
+				int set_mask;
+				calc_mask_pwm(set_mask, auxpwm2,throttle2,auxpins2);
+				set_aux_pwm(set_mask, auxpwm2);
+			}
+		}else if(updated){
+		// if mavlink cmd timeout, now see if there is rc input
+			if (dbgflag)
+			printf("use rc input \n");
+
+			if (rover_mode==ROVER_GPIO_MODE){
+				if (dbgflag)
+				  printf("rover gpio mode\n");
+				set_aux_pins(auxpins1,12); //if mavlink cmd present, do this, otherwise skip set pins and use whatever input_rc give
+			}
+			else if(rover_mode==ROVER_PWM_MODE){
+				if (dbgflag)
+				  printf("rover pwm mode\n");
+				int set_mask;
+				calc_mask_pwm(set_mask, auxpwm1,throttle,auxpins1);
+				set_aux_pwm(set_mask, auxpwm1);
+			}
+		}
+
+	}
+
+	thread_running = false;
+	return 0;
+}
+
+void rover_commander_status()
+{
+}
+
+/**
+ * @return true if file exists
+ */
+
+/*
+void handle_command(struct vehicle_command_s *cmd)
+{
+	int param;
+
+	switch (cmd->command) {
+
+	case VEHICLE_CMD_PREFLIGHT_STORAGE:
+		param = (int)(cmd->param3 + 0.5f);
+
+		if (param == 1)	{
+			rover_commander_start_log();
+
+		} else if (param == 2)	{
+			rover_commander_stop_log();
+		} else {
+			// Silently ignore non-matching command values, as they could be for params.
+		}
+
+		break;
+
+	default:
+		break;
+	}
+}
+
+void handle_status(struct vehicle_status_s *status)
+{
+	// TODO use flag from actuator_armed here?
+	bool armed = status->arming_state == ARMING_STATE_ARMED || status->arming_state == ARMING_STATE_ARMED_ERROR;
+
+	if (armed != flag_system_armed) {
+		flag_system_armed = armed;
+
+		if (flag_system_armed) {
+			rover_commander_start_log();
+
+		} else {
+			rover_commander_stop_log();
+		}
+	}
+}
+*/
