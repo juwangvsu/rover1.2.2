@@ -1150,7 +1150,7 @@ int Ekf2::start()
 
 	return OK;
 }
-
+bool Ekf::dbgflag=false;
 int ekf2_main(int argc, char *argv[])
 {
 	if (argc < 2) {
@@ -1202,6 +1202,15 @@ int ekf2_main(int argc, char *argv[])
 		}
 
 		return 0;
+	}
+	if (!strcmp(argv[1], "dbgtoggle")) {
+		if (ekf2::instance ) {
+			PX4_WARN("dbgtoggle running %d", Ekf::dbgflag);
+		 	Ekf::dbgflag = !Ekf::dbgflag;	
+			return 0;
+		}
+
+		return 1;
 	}
 
 	if (!strcmp(argv[1], "print")) {

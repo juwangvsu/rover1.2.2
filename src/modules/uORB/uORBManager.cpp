@@ -169,7 +169,7 @@ orb_advert_t uORB::Manager::orb_advertise_multi(const struct orb_metadata *meta,
 	int result, fd;
 	orb_advert_t advertiser;
 
-	//warnx("orb_advertise_multi meta = %p\n", meta);
+	warnx("orb_advertise_multi meta = %p\n", meta);
 
 	/* open the node as an advertiser */
 	fd = node_open(PUBSUB, meta, data, true, instance, priority);

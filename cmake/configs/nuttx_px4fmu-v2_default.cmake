@@ -58,15 +58,15 @@ set(config_module_list
 	#systemcmds/esc_calib
 	systemcmds/mixer
 	#systemcmds/motor_ramp
-	systemcmds/mtd
+	#systemcmds/mtd
 	systemcmds/nshterm
 	systemcmds/param
-	systemcmds/perf
+	#systemcmds/perf
 	systemcmds/pwm
 	systemcmds/reboot
 	#systemcmds/sd_bench
 	systemcmds/top
-	systemcmds/topic_listener
+	#systemcmds/topic_listener
 	systemcmds/ver
 
 	#
@@ -77,7 +77,7 @@ set(config_module_list
 	#lib/rc/rc_tests
 	modules/commander/commander_tests
 	modules/controllib_test
-	#modules/mavlink/mavlink_tests
+	modules/mavlink/mavlink_tests
 	modules/unit_test
 	modules/uORB/uORB_tests
 	systemcmds/tests
@@ -89,7 +89,7 @@ set(config_module_list
 	modules/load_mon
 	modules/navigator
 	modules/mavlink
-	modules/gpio_led
+	#modules/gpio_led
 	modules/uavcan
 	modules/land_detector
 
@@ -99,7 +99,7 @@ set(config_module_list
 	#modules/attitude_estimator_q
 	#modules/position_estimator_inav
 	#modules/local_position_estimator
-	#modules/ekf2
+	modules/ekf2
 
 	#
 	# Vehicle Control
@@ -116,7 +116,7 @@ set(config_module_list
 	#
 	#modules/logger
 	modules/sdlog2
-	modules/rover_commander
+	#modules/rover_commander
 
 	#
 	# Library modules
@@ -180,7 +180,7 @@ set(config_module_list
 	#examples/fixedwing_control
 
 	# Hardware test
-	examples/hwtest
+	#examples/hwtest
 )
 
 set(config_extra_builtin_cmds

@@ -674,7 +674,7 @@ then
 	then
 		frsky_telemetry start -d /dev/ttyS6
 	fi
-
+echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
 	if ver hwcmp PX4FMU_V2
 	then
 		# Check for flow sensor - as it is a background task, launch it last
@@ -743,11 +743,15 @@ then
 		ardrone_interface start -d /dev/ttyS1
 	fi
 
+echo "now check vehicle_type"
+	echo "VEHICLE_TYPE is $VEHICLE_TYPE "
+	param show VEHICLE_TYPE
 	#
 	# Fixed wing setup
 	#
 	if [ $VEHICLE_TYPE == fw ]
 	then
+			echo "vihecle type fw"
 		if [ $MIXER == none ]
 		then
 			# Set default mixer for fixed wing if not defined
@@ -774,6 +778,11 @@ then
 	#
 	if [ $VEHICLE_TYPE == mc ]
 	then
+		echo "vihecle type mc"
+		echo "$VEHICLE_TYPE "
+		param show VEHICLE_TYPE
+		param show MIXER
+		param show MAV_TYPE
 		if [ $MIXER == none ]
 		then
 			echo "Mixer undefined"
@@ -831,9 +840,12 @@ then
 
 		# Load mixer and configure outputs
 		sh /etc/init.d/rc.interface
+		echo " end of if VEHICLE_TYPE == mc"
 
 		# Start standard multicopter apps
 		sh /etc/init.d/rc.mc_apps
+		echo " end of if VEHICLE_TYPE == mc"
+		param show VEHICLE_TYPE
 	fi
 
 	#
@@ -841,6 +853,7 @@ then
 	#
 	if [ $VEHICLE_TYPE == vtol ]
 	then
+			echo "vehilce type votl"
 		if [ $MIXER == none ]
 		then
 			echo "VTOL mixer undefined"
@@ -884,6 +897,7 @@ then
 	#
 	if [ $VEHICLE_TYPE == rover ]
 	then
+		echo "rover MAV_TYPE"
 		# 10 is MAV_TYPE_GROUND_ROVER
 		set MAV_TYPE 10
 
@@ -903,6 +917,7 @@ then
 	#
 	if [ $VEHICLE_TYPE == passthrough ]
 	then
+		echo "vehicle type passthrough "
 		mavlink stop-all
 		commander stop
 
@@ -935,7 +950,7 @@ then
 		# Use 400 Hz PWM on all channels.
 		pwm rate -a -r 400
 	fi
-
+echo "check vehicle type done"
 	unset MIXER
 	unset MAV_TYPE
 	unset OUTPUT_MODE
@@ -952,6 +967,7 @@ then
 	then
 		echo "No autostart ID found"
 	fi
+	echo "check VEHICLE_TYPE"
 
 	# Start any custom addons
 	set FEXTRAS /fs/microsd/etc/extras.txt
@@ -992,4 +1008,5 @@ then
 	echo "NSH exit"
 	exit
 fi
+echo "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
 unset EXIT_ON_END

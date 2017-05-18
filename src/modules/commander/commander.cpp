@@ -693,6 +693,7 @@ bool handle_command(struct vehicle_status_s *status_local, const struct safety_s
 	unsigned cmd_result = vehicle_command_s::VEHICLE_CMD_RESULT_UNSUPPORTED;
 
 	/* request to set different system mode */
+	warnx("cmd %d\n", cmd->command);
 	switch (cmd->command) {
 	case vehicle_command_s::VEHICLE_CMD_DO_REPOSITION: {
 
@@ -2074,7 +2075,7 @@ int commander_thread_main(int argc, char *argv[])
 		orb_check(global_position_sub, &updated);
 
 		if (updated) {
-mavlink_log_critical(&mavlink_log_pub, "wang gps updated, valid %d", status_flags.condition_global_position_valid);
+//mavlink_log_critical(&mavlink_log_pub, "wang gps updated, valid %d", status_flags.condition_global_position_valid);
 			/* position changed */
 			vehicle_global_position_s gpos;
 			orb_copy(ORB_ID(vehicle_global_position), global_position_sub, &gpos);
@@ -2084,7 +2085,7 @@ mavlink_log_critical(&mavlink_log_pub, "wang gps updated, valid %d", status_flag
 			// XXX consolidate this with local position handling and timeouts after release
 			// but we want a low-risk change now.
 			if (status_flags.condition_global_position_valid) {
-mavlink_log_critical(&mavlink_log_pub, "wang gps was valid, curr eph %f, 2.5*threshhod is %f",(double)gpos.eph, (double)eph_threshold*2.5);
+//mavlink_log_critical(&mavlink_log_pub, "wang gps was valid, curr eph %f, 2.5*threshhod is %f",(double)gpos.eph, (double)eph_threshold*2.5);
 				if (gpos.eph < eph_threshold * 2.5f) {
 					orb_copy(ORB_ID(vehicle_global_position), global_position_sub, &global_position);
 				}
