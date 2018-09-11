@@ -45,7 +45,8 @@ import base64
 import zlib
 import time
 import subprocess
-
+import sys
+import logging
 #
 # Construct a basic firmware description
 #
@@ -63,6 +64,8 @@ def mkdesc():
 	proto['image_size']	= 0
 	return proto
 
+sys.stderr.write("\n******** jwang hack **************\n")
+sys.stderr.write("\n******** jwang hack **************\n")
 # Parse commandline
 parser = argparse.ArgumentParser(description="Firmware generator for the PX autopilot system.")
 parser.add_argument("--prototype",	action="store", help="read a prototype description from a file")
@@ -77,6 +80,7 @@ parser.add_argument("--airframe_xml",	action="store", help="the airframes.xml fi
 parser.add_argument("--image",		action="store", help="the firmware image")
 args = parser.parse_args()
 
+logging.warn(args)
 # Fetch the firmware descriptor prototype if specified
 if args.prototype != None:
 	f = open(args.prototype,"r")
@@ -118,5 +122,5 @@ if args.image != None:
 	bytes = f.read()
 	desc['image_size'] = len(bytes)
 	desc['image'] = base64.b64encode(zlib.compress(bytes,9)).decode('utf-8')
-
+logging.info(args)
 print(json.dumps(desc, indent=4))

@@ -91,7 +91,7 @@ set(config_module_list
 	modules/mavlink
 	#modules/gpio_led
 	modules/uavcan
-	modules/land_detector
+	#modules/land_detector
 
 	#
 	# Estimation modules
@@ -106,8 +106,8 @@ set(config_module_list
 	#
 	#modules/fw_pos_control_l1
 	#modules/fw_att_control
-	modules/mc_att_control
-	modules/mc_pos_control
+	#modules/mc_att_control
+	#modules/mc_pos_control
 	modules/mc_pos_control/mc_pos_control_tests
 	#modules/vtol_att_control
 
@@ -116,7 +116,7 @@ set(config_module_list
 	#
 	#modules/logger
 	modules/sdlog2
-	#modules/rover_commander
+	modules/rover_commander
 
 	#
 	# Library modules
